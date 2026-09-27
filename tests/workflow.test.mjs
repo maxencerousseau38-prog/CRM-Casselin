@@ -232,6 +232,59 @@ try {
   ok(await page.locator("#list .card").count() === 3, "Données lisibles HORS LIGNE (IndexedDB)");
   await context.setOffline(false);
 
+  // ---------- 12. Gestion des salons (modifier / archiver / désarchiver / supprimer) ----------
+  console.log("\n[12] Gestion complète des salons");
+  async function openSalonMenu() {
+    const d = page.locator(".salon-card .menu").first();
+    await d.locator(".menu__btn").click();
+    await d.locator(".menu__list").waitFor({ state: "visible" });
+    return d;
+  }
+  async function openSalons() {
+    await page.click('.tabbar__item[data-route="salons"]');
+    await page.waitForSelector(".salon-card, .empty");
+  }
+
+  // Modifier
+  await openSalons();
+  let menu = await openSalonMenu();
+  await menu.locator('a.menu__item[href$="/edit"]').click();
+  await page.waitForSelector('input[name="ville"]');
+  await page.fill('input[name="ville"]', "Villeurbanne");
+  await page.click("#save");
+  await page.waitForSelector(".salon-card");
+  ok((await page.locator(".salon-card").first().textContent()).includes("Villeurbanne"), "Salon modifié (ville mise à jour)");
+
+  // Archiver le salon actif
+  menu = await openSalonMenu();
+  await menu.locator("button[data-archive]").click();
+  await page.waitForFunction(() => document.getElementById("toggle-archived"));
+  ok((await page.locator("#view").textContent()).includes("Aucun salon actif"), "Salon archivé → retiré de la liste active");
+  ok(!(await page.locator("#header-salon").textContent()).includes("Sirha"), "Salon actif désélectionné après archivage");
+  ok(await page.locator("#toggle-archived").count() === 1, "Bouton d'affichage des archivés présent");
+
+  // Afficher les archivés + désarchiver
+  await page.click("#toggle-archived");
+  await page.waitForSelector(".salon-card.is-archived");
+  ok(await page.locator(".salon-card.is-archived").count() === 1, "Salon visible dans la section Archivés");
+  menu = await openSalonMenu();
+  await menu.locator("button[data-archive]").click();
+  await page.waitForFunction(() => !document.querySelector(".salon-card.is-archived") && document.querySelector(".salon-card"));
+  ok(await page.locator(".salon-card.is-archived").count() === 0, "Salon désarchivé → revenu dans la liste active");
+  ok(await page.locator("#toggle-archived").count() === 0, "Plus aucun salon archivé");
+
+  // Supprimer le salon (contacts conservés)
+  menu = await openSalonMenu();
+  await menu.locator("button[data-del]").click(); // confirm auto-accepté
+  await page.waitForFunction(() => document.querySelector("#view").textContent.includes("Aucun salon actif"));
+  ok((await page.locator("#view").textContent()).includes("Aucun salon actif"), "Salon supprimé");
+
+  // Les contacts existent toujours et ne sont plus associés au salon supprimé
+  await openContacts();
+  await page.waitForFunction(() => document.querySelectorAll("#list .card").length === 3);
+  ok(await countCards() === 3, "Contacts CONSERVÉS après suppression du salon (3 restants)");
+  ok(!(await page.locator("#list").textContent()).includes("Sirha Lyon 2026"), "Contacts détachés du salon supprimé (aucun badge salon)");
+
 } catch (err) {
   failed++;
   console.error("\nERREUR DE TEST:", err);

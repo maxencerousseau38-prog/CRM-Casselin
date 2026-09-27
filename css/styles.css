@@ -392,6 +392,45 @@ select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
   display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; font-weight: 500;
 }
 .pill-active::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--red); flex: 0 0 auto; }
+.salon-card { position: relative; }
+.salon-card.is-archived { opacity: 0.62; }
+.salon-card__head { min-width: 0; }
+.salon-card__badges { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.pill-archived {
+  font-size: 11px; color: var(--text-3); background: var(--surface-2);
+  border: 1px solid var(--line-2); padding: 3px 9px; border-radius: 999px;
+  flex: 0 0 auto; font-weight: 500;
+}
+
+/* Menu d'actions (⋯) */
+.menu { position: relative; }
+.menu__btn {
+  list-style: none; cursor: pointer;
+  width: 32px; height: 32px; display: grid; place-items: center;
+  border: 1px solid var(--line-2); border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-2);
+}
+.menu__btn::-webkit-details-marker { display: none; }
+.menu__btn::marker { content: ""; }
+.menu__btn svg { width: 18px; height: 18px; fill: currentColor; }
+.menu__btn:active { background: var(--surface-2); }
+.menu[open] .menu__btn { background: var(--surface-2); color: var(--text); }
+.menu__list {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 20;
+  min-width: 168px;
+  background: var(--surface-3); border: 1px solid var(--line-3);
+  border-radius: var(--radius); padding: 5px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.menu__item {
+  display: block; width: 100%; text-align: left;
+  padding: 10px 12px; font-size: 14px; font-weight: 500;
+  background: transparent; border: none; border-radius: var(--radius-sm);
+  color: var(--text); cursor: pointer; text-decoration: none; font-family: inherit;
+}
+.menu__item:active { background: var(--surface-2); }
+.menu__item--danger { color: var(--red-fg); }
 
 /* ---------- Export ---------- */
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; margin-top: 12px; }

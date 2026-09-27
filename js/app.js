@@ -511,6 +511,41 @@
   });
 
   /* ---------- Vue : Salons ---------- */
+  var salonShowArchived = false;
+
+  function salonCard(s, counts, activeId) {
+    var isActive = s.id === activeId;
+    var isArchived = !!s.archived;
+    var dates = [fmtDate(s.dateDebut), fmtDate(s.dateFin)].filter(Boolean).join(" → ");
+    var loc = [s.ville, s.pays].filter(Boolean).join(", ");
+    var n = counts[s.id] || 0;
+    var kebab = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>';
+    return '<div class="salon-card' + (isActive ? " is-active" : "") + (isArchived ? " is-archived" : "") + '">' +
+      '<div class="salon-card__top">' +
+        "<div class=\"salon-card__head\"><div class=\"salon-card__name\">" + esc(s.nom) + "</div>" +
+        (loc ? '<div class="salon-card__meta">' + esc(loc) + "</div>" : "") +
+        (dates ? '<div class="salon-card__meta">' + esc(dates) + "</div>" : "") +
+        "</div>" +
+        '<div class="salon-card__badges">' +
+          (isActive ? '<span class="pill-active">Actif</span>' : "") +
+          (isArchived ? '<span class="pill-archived">Archivé</span>' : "") +
+          '<details class="menu"><summary class="menu__btn" aria-label="Actions du salon">' + kebab + "</summary>" +
+            '<div class="menu__list">' +
+              '<a class="menu__item" href="#/salon/' + esc(s.id) + '/edit">Modifier</a>' +
+              '<button class="menu__item" data-archive="' + esc(s.id) + '" data-archived="' + (isArchived ? "1" : "0") + '">' +
+                (isArchived ? "Désarchiver" : "Archiver") + "</button>" +
+              '<button class="menu__item menu__item--danger" data-del="' + esc(s.id) + '">Supprimer</button>' +
+            "</div>" +
+          "</details>" +
+        "</div>" +
+      "</div>" +
+      '<div class="salon-card__count">' + n + " contact" + (n > 1 ? "s" : "") + "</div>" +
+      '<div class="salon-card__actions">' +
+        (isActive || isArchived ? "" : '<button class="btn btn--sm btn--primary" data-activate="' + esc(s.id) + '">Sélectionner</button>') +
+        '<a class="btn btn--sm" href="#/contacts?salon=' + esc(s.id) + '">Voir contacts</a>' +
+      "</div></div>";
+  }
+
   route("/salons", function () {
     return Promise.all([DB.getAllSalons(), DB.getAllContacts(), DB.getMeta("activeSalonId")])
       .then(function (res) {
@@ -518,30 +553,22 @@
         var counts = {};
         contacts.forEach(function (c) { if (c.salonId) counts[c.salonId] = (counts[c.salonId] || 0) + 1; });
         salons.sort(function (a, b) { return (b.dateDebut || "").localeCompare(a.dateDebut || ""); });
+        var actifs = salons.filter(function (s) { return !s.archived; });
+        var archives = salons.filter(function (s) { return s.archived; });
 
         view.innerHTML =
           '<h1 class="view__title">Salons</h1>' +
           '<a class="cta" href="#/salon/new"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> Nouveau salon</a>' +
-          (salons.length ? salons.map(function (s) {
-            var isActive = s.id === activeId;
-            var dates = [fmtDate(s.dateDebut), fmtDate(s.dateFin)].filter(Boolean).join(" → ");
-            var loc = [s.ville, s.pays].filter(Boolean).join(", ");
-            return '<div class="salon-card' + (isActive ? " is-active" : "") + '">' +
-              '<div class="salon-card__top">' +
-                "<div><div class=\"salon-card__name\">" + esc(s.nom) + "</div>" +
-                (loc ? '<div class="salon-card__meta">' + esc(loc) + "</div>" : "") +
-                (dates ? '<div class="salon-card__meta">' + esc(dates) + "</div>" : "") +
-                "</div>" +
-                (isActive ? '<span class="pill-active">Actif</span>' : "") +
-              "</div>" +
-              '<div class="salon-card__count">' + (counts[s.id] || 0) + " contact" + ((counts[s.id] || 0) > 1 ? "s" : "") + "</div>" +
-              '<div class="salon-card__actions">' +
-                (isActive ? "" : '<button class="btn btn--sm btn--primary" data-activate="' + esc(s.id) + '">Sélectionner</button>') +
-                '<a class="btn btn--sm" href="#/contacts?salon=' + esc(s.id) + '">Voir contacts</a>' +
-                '<a class="btn btn--sm" href="#/salon/' + esc(s.id) + '/edit">Modifier</a>' +
-                '<button class="btn btn--sm btn--danger" data-del="' + esc(s.id) + '">Suppr.</button>' +
-              "</div></div>";
-          }).join("") : emptyState("Aucun salon.", "Créez un salon pour regrouper vos contacts."));
+          (actifs.length
+            ? actifs.map(function (s) { return salonCard(s, counts, activeId); }).join("")
+            : emptyState("Aucun salon actif.", "Créez un salon pour regrouper vos contacts.")) +
+          (archives.length
+            ? '<button class="btn btn--ghost btn--block" id="toggle-archived" style="margin-top:16px">' +
+                (salonShowArchived ? "Masquer" : "Afficher") + " les salons archivés (" + archives.length + ")</button>" +
+              (salonShowArchived
+                ? '<div class="section-title">Archivés</div>' + archives.map(function (s) { return salonCard(s, counts, activeId); }).join("")
+                : "")
+            : "");
 
         view.querySelectorAll("[data-activate]").forEach(function (b) {
           b.addEventListener("click", function () {
@@ -549,17 +576,36 @@
               .then(refreshHeaderSalon).then(function () { toast("Salon actif mis à jour", "ok"); navigate(); });
           });
         });
+        view.querySelectorAll("[data-archive]").forEach(function (b) {
+          b.addEventListener("click", function () {
+            var id = b.getAttribute("data-archive");
+            var willArchive = b.getAttribute("data-archived") !== "1";
+            DB.setSalonArchived(id, willArchive).then(function () {
+              // Un salon archivé ne peut pas rester le salon actif.
+              if (willArchive) {
+                return DB.getMeta("activeSalonId").then(function (a) {
+                  if (a === id) return DB.setMeta("activeSalonId", null);
+                });
+              }
+            }).then(refreshHeaderSalon).then(function () {
+              toast(willArchive ? "Salon archivé" : "Salon désarchivé", "ok");
+              navigate();
+            });
+          });
+        });
         view.querySelectorAll("[data-del]").forEach(function (b) {
           b.addEventListener("click", function () {
             var id = b.getAttribute("data-del");
-            if (!confirm("Supprimer ce salon ? Les contacts associés ne seront pas supprimés.")) return;
+            if (!confirm("Supprimer ce salon ? Les contacts associés seront conservés dans le CRM.")) return;
             DB.deleteSalon(id).then(function () {
               return DB.getMeta("activeSalonId").then(function (a) {
                 if (a === id) return DB.setMeta("activeSalonId", null);
               });
-            }).then(refreshHeaderSalon).then(function () { toast("Salon supprimé", "ok"); navigate(); });
+            }).then(refreshHeaderSalon).then(function () { toast("Salon supprimé · contacts conservés", "ok"); navigate(); });
           });
         });
+        var tgl = document.getElementById("toggle-archived");
+        if (tgl) tgl.addEventListener("click", function () { salonShowArchived = !salonShowArchived; navigate(); });
       });
   });
 

@@ -125,9 +125,32 @@
     });
   }
 
+  // Archive / désarchive un salon (les contacts et l'association ne changent pas).
+  function setSalonArchived(id, archived) {
+    return getSalon(id).then(function (s) {
+      if (!s) return null;
+      s.archived = !!archived;
+      return saveSalon(s);
+    });
+  }
+
+  // Supprime un salon SANS supprimer ses contacts : les contacts associés sont
+  // simplement détachés (salonId vidé) et restent dans IndexedDB.
   function deleteSalon(id) {
-    return tx(STORE_SALONS, "readwrite").then(function (t) {
+    return openDB().then(function (db) {
+      var t = db.transaction([STORE_SALONS, STORE_CONTACTS], "readwrite");
       t.objectStore(STORE_SALONS).delete(id);
+      var cStore = t.objectStore(STORE_CONTACTS);
+      var cursorReq = cStore.index("salonId").openCursor(IDBKeyRange.only(id));
+      cursorReq.onsuccess = function (e) {
+        var cur = e.target.result;
+        if (!cur) return;
+        var c = cur.value;
+        c.salonId = "";
+        c.updatedAt = new Date().toISOString();
+        cur.update(c);
+        cur.continue();
+      };
       return txDone(t);
     });
   }
@@ -189,6 +212,7 @@
     getAllSalons: getAllSalons,
     getSalon: getSalon,
     saveSalon: saveSalon,
+    setSalonArchived: setSalonArchived,
     deleteSalon: deleteSalon,
     getMeta: getMeta,
     setMeta: setMeta,
