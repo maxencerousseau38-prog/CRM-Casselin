@@ -52,6 +52,41 @@
     if (scanObjectUrl) { URL.revokeObjectURL(scanObjectUrl); scanObjectUrl = null; }
   }
 
+  // OCR hors ligne (Tesseract.js) — assets 100% locaux, chargés au 1er scan.
+  var OCR_BASE = "vendor/tesseract/";
+  var _tessPromise = null;
+  function ensureTesseract() {
+    if (window.Tesseract) return Promise.resolve(window.Tesseract);
+    if (_tessPromise) return _tessPromise;
+    _tessPromise = new Promise(function (resolve, reject) {
+      var s = document.createElement("script");
+      s.src = OCR_BASE + "tesseract.min.js";
+      s.onload = function () {
+        if (window.Tesseract) resolve(window.Tesseract);
+        else reject(new Error("Moteur OCR indisponible."));
+      };
+      s.onerror = function () { _tessPromise = null; reject(new Error("Chargement du moteur OCR impossible.")); };
+      document.head.appendChild(s);
+    });
+    return _tessPromise;
+  }
+  // Reconnaît le texte d'un fichier image (fr+eng), assets locaux uniquement.
+  function ocrRecognize(file, onProgress) {
+    return ensureTesseract().then(function (T) {
+      return T.createWorker("fra+eng", 1, {
+        workerPath: OCR_BASE + "worker.min.js",
+        corePath: OCR_BASE + "tesseract-core.wasm.js",
+        langPath: OCR_BASE + "lang",
+        workerBlobURL: false,
+        logger: function (m) { if (onProgress) onProgress(m); }
+      }).then(function (worker) {
+        return worker.recognize(file).then(function (res) {
+          return worker.terminate().then(function () { return res.data.text || ""; });
+        });
+      });
+    });
+  }
+
   // Normalise une URL saisie pour un href cliquable (ajoute https:// si absent).
   function normalizeUrl(u) {
     u = String(u == null ? "" : u).trim();
@@ -362,6 +397,17 @@
                 '<button type="button" class="btn btn--sm" id="scan-retake">Reprendre</button>' +
                 '<button type="button" class="btn btn--sm btn--danger" id="scan-remove">Supprimer</button>' +
               "</div>" +
+              '<button type="button" class="btn btn--sm btn--primary scan__analyze" id="scan-analyze">Analyser la carte</button>' +
+              '<div class="scan__progress" id="scan-progress" hidden><span id="scan-progress-label">Analyse…</span></div>' +
+              '<div class="scan__result" id="scan-result" hidden>' +
+                '<label class="scan__result-label" for="scan-text">Texte détecté (brut)</label>' +
+                '<textarea id="scan-text" rows="6" readonly></textarea>' +
+                '<div class="scan__actions">' +
+                  '<button type="button" class="btn btn--sm" id="scan-reocr">Refaire</button>' +
+                  '<button type="button" class="btn btn--sm btn--danger" id="scan-clear">Effacer</button>' +
+                "</div>" +
+                '<p class="hint">Texte reconnu localement, en mémoire uniquement — non enregistré.</p>' +
+              "</div>" +
               '<p class="hint">La photo reste sur cet appareil, en mémoire uniquement — elle n\'est ni envoyée ni enregistrée.</p>' +
             "</div>" +
           "</div>" +
@@ -415,6 +461,44 @@
       var scanImg = document.getElementById("scan-img");
       var scanRetake = document.getElementById("scan-retake");
       var scanRemove = document.getElementById("scan-remove");
+      var scanAnalyze = document.getElementById("scan-analyze");
+      var scanProgress = document.getElementById("scan-progress");
+      var scanProgressLabel = document.getElementById("scan-progress-label");
+      var scanResult = document.getElementById("scan-result");
+      var scanText = document.getElementById("scan-text");
+      var scanReocr = document.getElementById("scan-reocr");
+      var scanClear = document.getElementById("scan-clear");
+
+      function resetOcr() {
+        scanProgress.hidden = true;
+        scanResult.hidden = true;
+        scanText.value = "";
+        scanAnalyze.disabled = false;
+      }
+      function setOcrProgress(m) {
+        var pct = Math.round((m && m.progress ? m.progress : 0) * 100);
+        var label = m && m.status === "recognizing text" ? "Analyse" : "Préparation";
+        scanProgressLabel.textContent = label + "… " + pct + "%";
+      }
+      function runOcr() {
+        var f = scanInput.files && scanInput.files[0];
+        if (!f) return;
+        scanAnalyze.disabled = true;
+        scanResult.hidden = true;
+        scanProgress.hidden = false;
+        setOcrProgress({ status: "loading", progress: 0 });
+        ocrRecognize(f, setOcrProgress).then(function (text) {
+          scanProgress.hidden = true;
+          scanText.value = (text || "").trim();
+          scanResult.hidden = false;
+          scanAnalyze.disabled = false;
+        }).catch(function (err) {
+          scanProgress.hidden = true;
+          scanAnalyze.disabled = false;
+          toast("Analyse impossible : " + (err.message || err), "err");
+        });
+      }
+
       scanBtn.addEventListener("click", function () { scanInput.click(); });
       scanRetake.addEventListener("click", function () { scanInput.click(); });
       scanInput.addEventListener("change", function () {
@@ -425,6 +509,7 @@
         scanImg.src = scanObjectUrl;
         scanPreview.hidden = false;
         scanBtn.hidden = true;
+        resetOcr(); // nouvelle photo → efface l'OCR précédent
       });
       scanRemove.addEventListener("click", function () {
         revokeScan();
@@ -432,6 +517,13 @@
         scanInput.value = "";
         scanPreview.hidden = true;
         scanBtn.hidden = false;
+        resetOcr();
+      });
+      scanAnalyze.addEventListener("click", runOcr);
+      scanReocr.addEventListener("click", runOcr);
+      scanClear.addEventListener("click", function () {
+        scanText.value = "";
+        scanResult.hidden = true;
       });
     });
   }

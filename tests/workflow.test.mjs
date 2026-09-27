@@ -518,6 +518,99 @@ try {
     "Capture disponible HORS LIGNE (aucun backend requis)");
   await context.setOffline(false);
 
+  // ---------- 15. OCR hors ligne (Tesseract.js local) ----------
+  console.log("\n[15] OCR hors ligne (Tesseract.js local)");
+  const fs4 = await import("fs");
+  const ocrTextIncludes = () => {
+    return page.waitForFunction(() => {
+      const t = document.getElementById("scan-text");
+      const r = document.getElementById("scan-result");
+      return r && !r.hidden && t && /CASSELIN/i.test(t.value);
+    }, null, { timeout: 60000 });
+  };
+  // Image de carte nette (texte connu) pour un OCR déterministe
+  const cardDataUrl = await page.evaluate(() => {
+    const c = document.createElement("canvas"); c.width = 900; c.height = 300;
+    const g = c.getContext("2d");
+    g.fillStyle = "#ffffff"; g.fillRect(0, 0, c.width, c.height);
+    g.fillStyle = "#000000"; g.font = "bold 90px Arial"; g.fillText("CASSELIN", 40, 120);
+    g.font = "44px Arial"; g.fillText("contact@casselin.com", 40, 210);
+    return c.toDataURL("image/png");
+  });
+  const cardPath = join(userDataDir, "card.png");
+  fs4.writeFileSync(cardPath, Buffer.from(cardDataUrl.split(",")[1], "base64"));
+
+  // Capturer puis analyser (1er scan → chargement des assets locaux)
+  await page.click('.tabbar__item[data-route="new"]');
+  await page.waitForSelector("#scan-input", { state: "attached" });
+  await page.setInputFiles("#scan-input", cardPath);
+  await page.waitForSelector("#scan-preview:not([hidden])");
+  ok(await page.locator("#scan-analyze").isVisible(), "Bouton « Analyser la carte » présent après capture");
+  ok(await page.locator("#scan-result").isHidden(), "Résultat OCR masqué avant analyse");
+
+  const ocrReqs = [];
+  const onOcrReq = (r) => ocrReqs.push(r.url());
+  page.on("request", onOcrReq);
+  await page.click("#scan-analyze");
+  await page.waitForSelector("#scan-progress:not([hidden])");
+  ok(/Analyse|Préparation/.test(await page.locator("#scan-progress").textContent()), "Progression « Analyse… » affichée");
+  await ocrTextIncludes();
+  page.off("request", onOcrReq);
+  const ocrText = await page.locator("#scan-text").inputValue();
+  ok(/CASSELIN/i.test(ocrText), "Texte OCR brut affiché (CASSELIN reconnu)");
+  ok(/casselin\.com/i.test(ocrText), "OCR reconnaît aussi l'email");
+
+  // Assets 100% locaux : aucune requête externe/CDN
+  const externalReqs = ocrReqs.filter((u) =>
+    !u.startsWith(`http://localhost:${PORT}`) && !u.startsWith("http://127.0.0.1") &&
+    !u.startsWith("blob:") && !u.startsWith("data:"));
+  ok(externalReqs.length === 0, "Aucune requête CDN/externe pendant l'OCR : " + JSON.stringify(externalReqs.slice(0, 3)));
+  ok(ocrReqs.some((u) => u.includes("/vendor/tesseract/")), "Assets OCR chargés depuis vendor/tesseract/ (local)");
+
+  // « Refaire » relance l'analyse
+  await page.click("#scan-reocr");
+  await page.waitForSelector("#scan-progress:not([hidden])");
+  await ocrTextIncludes();
+  ok(true, "« Refaire » relance l'analyse OCR");
+
+  // « Effacer » vide le texte OCR
+  await page.click("#scan-clear");
+  await page.waitForSelector("#scan-result[hidden]", { state: "attached" });
+  ok((await page.locator("#scan-text").inputValue()) === "", "« Effacer » vide le texte OCR");
+
+  // Aucune donnée OCR/photo stockée dans IndexedDB
+  await page.setInputFiles("#scan-input", cardPath);
+  await page.waitForSelector("#scan-preview:not([hidden])");
+  await page.click("#scan-analyze");
+  await ocrTextIncludes();
+  await page.fill('input[name="prenom"]', "OcrTest");
+  await page.click("#save");
+  await page.waitForSelector(".detail__name");
+  await openExport();
+  const [ocrDl] = await Promise.all([page.waitForEvent("download"), page.click("#json-btn")]);
+  const ocrPath = join(userDataDir, "ocr-check.json");
+  await ocrDl.saveAs(ocrPath);
+  const ocrData = JSON.parse(fs4.readFileSync(ocrPath, "utf8"));
+  const ocrC = ocrData.contacts.find((c) => c.prenom === "OcrTest");
+  ok(!!ocrC, "Contact enregistré normalement");
+  const ocrSer = JSON.stringify(ocrC);
+  ok(!/CASSELIN|casselin\.com|blob:|data:image|base64/i.test(ocrSer) && ocrSer.length < 2000,
+    "Aucun texte OCR ni image stocké dans IndexedDB");
+
+  // OCR fonctionne HORS LIGNE (assets en cache PWA après le 1er scan en ligne)
+  await page.evaluate(async () => { await navigator.serviceWorker.ready; });
+  await page.waitForTimeout(300);
+  await context.setOffline(true);
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.click('.tabbar__item[data-route="new"]');
+  await page.waitForSelector("#scan-input", { state: "attached" });
+  await page.setInputFiles("#scan-input", cardPath);
+  await page.waitForSelector("#scan-preview:not([hidden])");
+  await page.click("#scan-analyze");
+  await ocrTextIncludes();
+  ok(true, "OCR fonctionne HORS LIGNE via le cache PWA");
+  await context.setOffline(false);
+
 } catch (err) {
   failed++;
   console.error("\nERREUR DE TEST:", err);

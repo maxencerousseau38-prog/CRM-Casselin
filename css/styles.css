@@ -285,6 +285,16 @@ select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
 .scan__preview img { width: 100%; max-height: 240px; object-fit: contain; background: var(--surface-2); border: 1px solid var(--line-2); border-radius: var(--radius); }
 .scan__actions { display: flex; gap: 8px; }
 .scan__actions .btn { flex: 1; }
+.scan__analyze { width: 100%; }
+.scan__progress { font-size: 13px; color: var(--text-2); font-weight: 500; padding: 4px 2px; }
+.scan__result { display: flex; flex-direction: column; gap: 10px; }
+.scan__result-label { font-size: 13px; color: var(--text-2); font-weight: 500; }
+#scan-text {
+  width: 100%; padding: 12px 14px; font-size: 14px; line-height: 1.5;
+  color: var(--text); background: var(--surface-2); border: 1px solid var(--line-2);
+  border-radius: var(--radius); font-family: inherit; resize: vertical; min-height: 96px;
+  white-space: pre-wrap;
+}
 .field { display: flex; flex-direction: column; gap: 7px; }
 .field label { font-size: 13px; color: var(--text-2); font-weight: 500; letter-spacing: -0.005em; }
 .field input, .field select, .field textarea {
