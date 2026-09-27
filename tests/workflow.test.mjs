@@ -366,6 +366,93 @@ try {
   ok(await countCards() === 3, "Contacts CONSERVÉS après suppression du salon (3 restants)");
   ok(!(await page.locator("#list").textContent()).includes("Sirha Lyon 2026"), "Contacts détachés du salon supprimé (aucun badge salon)");
 
+  // ---------- 13. Champ « Site web » ----------
+  console.log("\n[13] Champ Site web");
+  const fs2 = await import("fs");
+
+  // Ouvre une fiche contact de façon robuste (évite les courses de filtre).
+  async function openContactByName(q, name) {
+    await openContacts();
+    await page.fill("#q", q);
+    await page.waitForFunction((n) => {
+      const cards = document.querySelectorAll("#list .card");
+      return cards.length === 1 && cards[0].textContent.includes(n);
+    }, name);
+    await page.click("#list .card");
+    await page.waitForFunction((n) =>
+      document.querySelector(".detail__name") && document.querySelector("#view").textContent.includes(n), name);
+  }
+
+  // Créer un contact AVEC un site web
+  await page.click('.tabbar__item[data-route="new"]');
+  await page.waitForSelector('input[name="prenom"]');
+  await page.fill('input[name="prenom"]', "Paul");
+  await page.fill('input[name="nom"]', "Web");
+  await page.fill('input[name="entreprise"]', "Casselin");
+  await page.fill('input[name="website"]', "casselin.com");
+  await page.click("#save");
+  await page.waitForSelector(".detail__name");
+  ok((await page.locator("#view").textContent()).includes("casselin.com"), "Site web affiché sur la fiche");
+  ok((await page.locator('.info__val a[target="_blank"]').getAttribute("href")) === "https://casselin.com",
+    "Lien site web normalisé (https://) et ouvrable dans un nouvel onglet");
+
+  // Recharger et vérifier la persistance (IndexedDB)
+  await page.goto(BASE, { waitUntil: "networkidle" });
+  await openContactByName("paul", "Paul");
+  ok((await page.locator("#view").textContent()).includes("casselin.com"), "Site web conservé après rechargement");
+
+  // Un ancien contact SANS website fonctionne toujours
+  await openContactByName("sophie", "Sophie");
+  ok((await page.locator("#view").textContent()).includes("Sophie") &&
+     !(await page.locator("#view").textContent()).includes("Site web"),
+    "Ancien contact sans website : fiche OK, aucune ligne Site web");
+
+  // Export JSON inclut website (et reste vide pour les anciens)
+  await openExport();
+  const [jsonWebDl] = await Promise.all([page.waitForEvent("download"), page.click("#json-btn")]);
+  const jsonWebPath = join(userDataDir, "backup-website.json");
+  await jsonWebDl.saveAs(jsonWebPath);
+  const dataWeb = JSON.parse(fs2.readFileSync(jsonWebPath, "utf8"));
+  const paul = dataWeb.contacts.find((c) => c.prenom === "Paul");
+  const sophieC = dataWeb.contacts.find((c) => c.prenom === "Sophie");
+  ok(paul && paul.website === "casselin.com", "Export JSON inclut le champ website");
+  ok(sophieC && !sophieC.website, "Export JSON : ancien contact sans website (vide)");
+
+  // Round-trip import : modifier localement puis réimporter → website restauré
+  await openContactByName("paul", "Paul");
+  await page.click('a.btn[href$="/edit"]');
+  await page.waitForSelector('input[name="website"]');
+  await page.fill('input[name="website"]', "modifie.example");
+  await page.click("#save");
+  await page.waitForSelector(".info");
+  await openExport();
+  const [impWebDl] = await Promise.all([
+    page.waitForEvent("download"),                 // backup auto avant import
+    page.setInputFiles("#file-merge", jsonWebPath),
+  ]);
+  ok(/backup-auto/.test(impWebDl.suggestedFilename()), "Backup de sécurité auto avant réimport");
+  await page.waitForFunction(() => document.querySelector(".view__title")?.textContent.includes("Tableau de bord"));
+  await openContactByName("paul", "Paul");
+  const paulView = await page.locator("#view").textContent();
+  ok(paulView.includes("casselin.com") && !paulView.includes("modifie.example"),
+    "Import JSON restaure correctement le website");
+
+  // Export CSV : colonne Site web présente, valeur correcte, cellule vide pour ancien contact
+  await openExport();
+  const [csvWebDl] = await Promise.all([page.waitForEvent("download"), page.click("#csv-btn")]);
+  const csvWebPath = join(userDataDir, "contacts-website.csv");
+  await csvWebDl.saveAs(csvWebPath);
+  const csvWeb = fs2.readFileSync(csvWebPath, "utf8");
+  const csvLines = csvWeb.split(/\r?\n/);
+  const csvHead = csvLines[1].split(";");
+  const wIdx = csvHead.indexOf("Site web");
+  ok(wIdx !== -1, "CSV : colonne « Site web » présente");
+  ok(csvWeb.includes("casselin.com"), "CSV : site web exporté");
+  const paulLine = csvLines.find((l) => l.startsWith("Paul;"));
+  const sophieLine = csvLines.find((l) => l.startsWith("Sophie;"));
+  ok(paulLine && paulLine.split(";")[wIdx] === "casselin.com", "CSV : site web de Paul dans la bonne colonne");
+  ok(sophieLine && sophieLine.split(";")[wIdx] === "", "CSV : ancien contact sans site → cellule vide");
+
 } catch (err) {
   failed++;
   console.error("\nERREUR DE TEST:", err);

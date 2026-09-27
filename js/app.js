@@ -45,6 +45,14 @@
     return parts[2] + "/" + parts[1] + "/" + parts[0];
   }
 
+  // Normalise une URL saisie pour un href cliquable (ajoute https:// si absent).
+  function normalizeUrl(u) {
+    u = String(u == null ? "" : u).trim();
+    if (!u) return "";
+    if (!/^https?:\/\//i.test(u)) u = "https://" + u;
+    return u;
+  }
+
   function todayISO() {
     var d = new Date();
     var m = String(d.getMonth() + 1).padStart(2, "0");
@@ -345,6 +353,7 @@
             fieldInput("email", "Email", c.email, "email", "email") +
             fieldInput("telephone", "Téléphone", c.telephone, "tel", "tel") +
           "</div>" +
+          fieldInput("website", "Site web", c.website, "url", "url") +
           '<div class="row2">' +
             fieldInput("ville", "Ville", c.ville, "text", "address-level2") +
             fieldInput("pays", "Pays", c.pays, "text", "country-name") +
@@ -402,7 +411,7 @@
 
   function collectForm(form, base) {
     var d = Object.assign({}, base);
-    ["prenom", "nom", "entreprise", "fonction", "email", "telephone", "ville", "pays",
+    ["prenom", "nom", "entreprise", "fonction", "email", "telephone", "website", "ville", "pays",
      "type", "produits", "notes", "prochaineAction", "dateRelance", "dateRencontre", "salonId"]
       .forEach(function (name) {
         var el = form.elements[name];
@@ -481,6 +490,7 @@
           row("Intérêt", interetLabel) +
           row("Email", c.email ? '<a href="mailto:' + esc(c.email) + '">' + esc(c.email) + "</a>" : "", true) +
           row("Téléphone", c.telephone ? '<a href="tel:' + esc(c.telephone.replace(/\s/g, "")) + '">' + esc(c.telephone) + "</a>" : "", true) +
+          row("Site web", c.website ? '<a href="' + esc(normalizeUrl(c.website)) + '" target="_blank" rel="noopener noreferrer">' + esc(c.website) + "</a>" : "", true) +
           row("Localisation", [c.ville, c.pays].filter(Boolean).join(", ")) +
           row("Produits", c.produits) +
           row("Notes", c.notes) +
@@ -780,13 +790,13 @@
       suffix = slug(salonMap[salonId] ? salonMap[salonId].nom : "salon");
     }
     if (!rows.length) { toast("Aucun contact à exporter pour cette sélection.", "err"); return; }
-    var headers = ["Prénom", "Nom", "Entreprise", "Fonction", "Email", "Téléphone", "Ville", "Pays",
+    var headers = ["Prénom", "Nom", "Entreprise", "Fonction", "Email", "Téléphone", "Site web", "Ville", "Pays",
       "Type", "Intérêt", "Produits", "Notes", "Prochaine action", "Date relance", "Relance faite",
       "Salon", "Date rencontre"];
     var lines = [headers.map(csvCell).join(";")];
     rows.forEach(function (c) {
       lines.push([
-        c.prenom, c.nom, c.entreprise, c.fonction, c.email, c.telephone, c.ville, c.pays,
+        c.prenom, c.nom, c.entreprise, c.fonction, c.email, c.telephone, c.website, c.ville, c.pays,
         c.type, c.interet, c.produits, c.notes, c.prochaineAction, fmtDate(c.dateRelance),
         c.relanceFaite ? "Oui" : "Non",
         c.salonId && salonMap[c.salonId] ? salonMap[c.salonId].nom : "",
