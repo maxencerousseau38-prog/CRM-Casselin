@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#15181c" />
+  <meta name="description" content="CRM interne hors ligne pour les commerciaux Casselin en salon professionnel." />
+  <title>Casselin CRM — Salons</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Casselin CRM" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="app-header__brand">
+      <span class="app-header__logo" aria-hidden="true">C</span>
+      <div class="app-header__titles">
+        <span class="app-header__name">Casselin</span>
+        <span class="app-header__sub">CRM Salons</span>
+      </div>
+    </div>
+    <div class="app-header__salon" id="header-salon" title="Salon actif"></div>
+  </header>
+
+  <main id="view" class="view" tabindex="-1"><!-- Rendu par app.js --></main>
+
+  <nav class="tabbar" aria-label="Navigation principale">
+    <a class="tabbar__item" data-route="dashboard" href="#/">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>
+      <span>Accueil</span>
+    </a>
+    <a class="tabbar__item" data-route="contacts" href="#/contacts">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 11a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm-8 0a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm0 2c-3 0-6 1.5-6 4.5V20h9v-2.5A5.7 5.7 0 0 1 5.5 13 8.9 8.9 0 0 0 8 13zm8 0c-.7 0-1.4.1-2 .2A5.6 5.6 0 0 1 17 17.5V20h7v-2.5c0-3-3-4.5-6-4.5z"/></svg>
+      <span>Contacts</span>
+    </a>
+    <a class="tabbar__item tabbar__item--fab" data-route="new" href="#/contact/new" aria-label="Nouveau contact">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke-width="2.5" stroke-linecap="round"/></svg>
+    </a>
+    <a class="tabbar__item" data-route="salons" href="#/salons">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21V8l8-5 8 5v13h-6v-6h-4v6z"/></svg>
+      <span>Salons</span>
+    </a>
+    <a class="tabbar__item" data-route="relances" href="#/relances">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 11h4v-2h-3V7h-2v6z"/></svg>
+      <span>Relances</span>
+    </a>
+  </nav>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="js/db.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

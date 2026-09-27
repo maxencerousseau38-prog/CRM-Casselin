@@ -1,0 +1,15 @@
+{
+  "name": "casselin-crm",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CRM interne hors ligne pour les commerciaux Casselin en salon.",
+  "scripts": {
+    "start": "python3 -m http.server 8080",
+    "serve": "python3 -m http.server 8080",
+    "icons": "node scripts/gen-icons.mjs",
+    "test": "node tests/workflow.test.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0"
+  }
+}

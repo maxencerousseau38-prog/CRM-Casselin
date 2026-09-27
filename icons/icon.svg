@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Casselin CRM">
+  <rect width="512" height="512" rx="96" fill="#15181c"/>
+  <rect x="40" y="40" width="432" height="432" rx="72" fill="none" stroke="#2a2f36" stroke-width="4"/>
+  <path d="M338 190c-18-26-48-42-84-42-58 0-102 46-102 108s44 108 102 108c36 0 66-16 84-42l-44-28c-9 13-23 21-40 21-30 0-52-25-52-59s22-59 52-59c17 0 31 8 40 21z" fill="#e2001a"/>
+  <rect x="150" y="340" width="212" height="16" rx="8" fill="#4b535d"/>
+</svg>
