@@ -453,6 +453,71 @@ try {
   ok(paulLine && paulLine.split(";")[wIdx] === "casselin.com", "CSV : site web de Paul dans la bonne colonne");
   ok(sophieLine && sophieLine.split(";")[wIdx] === "", "CSV : ancien contact sans site → cellule vide");
 
+  // ---------- 14. Capture photo carte de visite (sans OCR, mémoire uniquement) ----------
+  console.log("\n[14] Capture photo carte de visite");
+  const fs3 = await import("fs");
+  // PNG 1×1 valide (image simulée, pas de vraie caméra)
+  const pngBuf = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAen63NgAAAAASUVORK5CYII=",
+    "base64"
+  );
+  const imgFile = { name: "carte.png", mimeType: "image/png", buffer: pngBuf };
+
+  // Contrôle de capture présent avec les bons attributs
+  await page.click('.tabbar__item[data-route="new"]');
+  await page.waitForSelector("#scan-input", { state: "attached" });
+  ok((await page.locator("#scan-input").getAttribute("accept")) === "image/*", 'Contrôle capture : accept="image/*"');
+  ok((await page.locator("#scan-input").getAttribute("capture")) === "environment", 'Contrôle capture : capture="environment"');
+  ok(await page.locator("#scan-btn").count() === 1, 'Action « Scanner une carte » présente');
+  ok(await page.locator("#scan-preview").isHidden(), "Aperçu masqué au départ");
+
+  // Sélection d'une image simulée → aperçu affiché (blob en mémoire, pas d'upload)
+  await page.setInputFiles("#scan-input", imgFile);
+  await page.waitForSelector("#scan-preview:not([hidden])");
+  const src1 = await page.locator("#scan-img").getAttribute("src");
+  ok(/^blob:/.test(src1 || ""), "Aperçu affiché depuis un blob local (aucun envoi réseau)");
+  ok(await page.locator("#scan-btn").isHidden(), "Bouton scan masqué pendant l'aperçu");
+
+  // Reprendre : une nouvelle sélection remplace l'aperçu
+  await page.setInputFiles("#scan-input", { name: "carte2.png", mimeType: "image/png", buffer: pngBuf });
+  await page.waitForFunction((prev) => {
+    const i = document.getElementById("scan-img");
+    return i && i.src && i.src.startsWith("blob:") && i.src !== prev;
+  }, src1);
+  ok(true, "Reprendre : aperçu remplacé par la nouvelle photo");
+
+  // Supprimer : aperçu retiré, bouton scan de nouveau visible
+  await page.click("#scan-remove");
+  await page.waitForSelector("#scan-preview[hidden]", { state: "attached" });
+  ok(await page.locator("#scan-preview").isHidden(), "Suppression : aperçu retiré");
+  ok(await page.locator("#scan-btn").isVisible(), "Bouton scan de nouveau visible après suppression");
+
+  // Enregistrer un contact APRÈS avoir scanné → aucune image stockée dans IndexedDB
+  await page.setInputFiles("#scan-input", imgFile);
+  await page.waitForSelector("#scan-preview:not([hidden])");
+  await page.fill('input[name="prenom"]', "ScanTest");
+  await page.click("#save");
+  await page.waitForSelector(".detail__name");
+  await openExport();
+  const [scanDl] = await Promise.all([page.waitForEvent("download"), page.click("#json-btn")]);
+  const scanPath = join(userDataDir, "scan-check.json");
+  await scanDl.saveAs(scanPath);
+  const scanData = JSON.parse(fs3.readFileSync(scanPath, "utf8"));
+  const scanC = scanData.contacts.find((c) => c.prenom === "ScanTest");
+  ok(!!scanC, "Contact enregistré normalement");
+  const scanSerialized = JSON.stringify(scanC);
+  ok(!/blob:|data:image|base64|iVBOR/i.test(scanSerialized) && scanSerialized.length < 2000,
+    "Aucune image stockée dans IndexedDB (le contact ne contient pas la photo)");
+
+  // Hors ligne : le contrôle de capture reste disponible (HTML statique en cache)
+  await context.setOffline(true);
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.click('.tabbar__item[data-route="new"]');
+  await page.waitForSelector("#scan-input", { state: "attached" });
+  ok((await page.locator("#scan-input").getAttribute("capture")) === "environment",
+    "Capture disponible HORS LIGNE (aucun backend requis)");
+  await context.setOffline(false);
+
 } catch (err) {
   failed++;
   console.error("\nERREUR DE TEST:", err);

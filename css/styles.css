@@ -45,6 +45,7 @@
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+[hidden] { display: none !important; }
 
 html, body {
   margin: 0;
@@ -276,6 +277,14 @@ select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
 
 /* ---------- Forms ---------- */
 .form { display: flex; flex-direction: column; gap: 16px; }
+/* Capture carte de visite (aperçu mémoire) */
+.scan { display: flex; flex-direction: column; gap: 10px; }
+.scan__btn { align-self: flex-start; }
+.scan__btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.scan__preview { display: flex; flex-direction: column; gap: 10px; }
+.scan__preview img { width: 100%; max-height: 240px; object-fit: contain; background: var(--surface-2); border: 1px solid var(--line-2); border-radius: var(--radius); }
+.scan__actions { display: flex; gap: 8px; }
+.scan__actions .btn { flex: 1; }
 .field { display: flex; flex-direction: column; gap: 7px; }
 .field label { font-size: 13px; color: var(--text-2); font-weight: 500; letter-spacing: -0.005em; }
 .field input, .field select, .field textarea {

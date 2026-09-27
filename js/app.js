@@ -45,6 +45,13 @@
     return parts[2] + "/" + parts[1] + "/" + parts[0];
   }
 
+  // Capture photo (carte de visite) : aperçu EN MÉMOIRE uniquement.
+  // La photo n'est jamais envoyée ni stockée (ni IndexedDB ni modèle contact).
+  var scanObjectUrl = null;
+  function revokeScan() {
+    if (scanObjectUrl) { URL.revokeObjectURL(scanObjectUrl); scanObjectUrl = null; }
+  }
+
   // Normalise une URL saisie pour un href cliquable (ajoute https:// si absent).
   function normalizeUrl(u) {
     u = String(u == null ? "" : u).trim();
@@ -327,6 +334,7 @@
   });
 
   function renderContactForm(contact) {
+    revokeScan(); // libère toute photo d'un rendu précédent (mémoire uniquement)
     return Promise.all([DB.getAllSalons(), DB.getMeta("activeSalonId")]).then(function (res) {
       var salons = res[0], activeId = res[1];
       var isNew = !contact;
@@ -343,6 +351,20 @@
         '<button class="back" id="back"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg> Retour</button>' +
         '<h1 class="view__title">' + (isNew ? "Nouveau contact" : "Modifier le contact") + "</h1>" +
         '<form class="form" id="contact-form" autocomplete="off">' +
+          '<div class="scan" id="scan">' +
+            '<input type="file" id="scan-input" accept="image/*" capture="environment" style="display:none" />' +
+            '<button type="button" class="btn btn--ghost btn--sm scan__btn" id="scan-btn">' +
+              '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3"/></svg>' +
+              " Scanner une carte</button>" +
+            '<div class="scan__preview" id="scan-preview" hidden>' +
+              '<img id="scan-img" alt="Aperçu de la carte de visite" />' +
+              '<div class="scan__actions">' +
+                '<button type="button" class="btn btn--sm" id="scan-retake">Reprendre</button>' +
+                '<button type="button" class="btn btn--sm btn--danger" id="scan-remove">Supprimer</button>' +
+              "</div>" +
+              '<p class="hint">La photo reste sur cet appareil, en mémoire uniquement — elle n\'est ni envoyée ni enregistrée.</p>' +
+            "</div>" +
+          "</div>" +
           '<div class="row2">' +
             fieldInput("prenom", "Prénom", c.prenom, "text", "given-name") +
             fieldInput("nom", "Nom", c.nom, "text", "family-name") +
@@ -385,6 +407,32 @@
       });
       var saveNew = document.getElementById("save-new");
       if (saveNew) saveNew.addEventListener("click", function () { submitContact(form, c, true); });
+
+      // Capture photo (carte de visite) — aperçu mémoire uniquement.
+      var scanInput = document.getElementById("scan-input");
+      var scanBtn = document.getElementById("scan-btn");
+      var scanPreview = document.getElementById("scan-preview");
+      var scanImg = document.getElementById("scan-img");
+      var scanRetake = document.getElementById("scan-retake");
+      var scanRemove = document.getElementById("scan-remove");
+      scanBtn.addEventListener("click", function () { scanInput.click(); });
+      scanRetake.addEventListener("click", function () { scanInput.click(); });
+      scanInput.addEventListener("change", function () {
+        var f = scanInput.files && scanInput.files[0];
+        if (!f) return;
+        revokeScan();
+        scanObjectUrl = URL.createObjectURL(f);
+        scanImg.src = scanObjectUrl;
+        scanPreview.hidden = false;
+        scanBtn.hidden = true;
+      });
+      scanRemove.addEventListener("click", function () {
+        revokeScan();
+        scanImg.removeAttribute("src");
+        scanInput.value = "";
+        scanPreview.hidden = true;
+        scanBtn.hidden = false;
+      });
     });
   }
 
