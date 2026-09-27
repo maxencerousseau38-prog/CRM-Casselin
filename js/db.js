@@ -184,22 +184,78 @@
       });
   }
 
-  // mode: "merge" (par défaut) ou "replace"
-  function importAll(data, mode) {
-    if (!data || !Array.isArray(data.contacts) || !Array.isArray(data.salons)) {
-      return Promise.reject(new Error("Fichier de sauvegarde invalide."));
+  // Versions de sauvegarde acceptées à l'import.
+  var SUPPORTED_VERSIONS = [1];
+
+  // Valide la forme d'une sauvegarde AVANT toute écriture.
+  // Retourne { valid: bool, error: string|null }.
+  function validateBackup(data) {
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      return { valid: false, error: "Fichier de sauvegarde invalide." };
     }
+    if (data.app !== "casselin-crm") {
+      return { valid: false, error: "Ce fichier n'est pas une sauvegarde Casselin CRM." };
+    }
+    if (typeof data.version !== "number" || SUPPORTED_VERSIONS.indexOf(data.version) === -1) {
+      return { valid: false, error: "Version de sauvegarde non supportée." };
+    }
+    if (!Array.isArray(data.contacts) || !Array.isArray(data.salons)) {
+      return { valid: false, error: "Fichier de sauvegarde invalide (contacts / salons)." };
+    }
+    return { valid: true, error: null };
+  }
+
+  // Importe une sauvegarde. mode: "merge" (défaut) ou "replace".
+  //  - merge   : upsert par id, conserve les données locales absentes du fichier.
+  //  - replace : vide contacts + salons, réécrit meta (activeSalonId) depuis le fichier.
+  // Valide AVANT toute écriture ; aucune écriture partielle si invalide.
+  // Résout avec un récapitulatif { mode, contactsAdded, contactsUpdated, salonsAdded, salonsUpdated }.
+  function importAll(data, mode) {
+    var v = validateBackup(data);
+    if (!v.valid) return Promise.reject(new Error(v.error));
+    mode = mode === "replace" ? "replace" : "merge";
+    var summary = { mode: mode, contactsAdded: 0, contactsUpdated: 0, salonsAdded: 0, salonsUpdated: 0 };
+
     return openDB().then(function (db) {
-      var t = db.transaction([STORE_CONTACTS, STORE_SALONS, STORE_META], "readwrite");
-      var cStore = t.objectStore(STORE_CONTACTS);
-      var sStore = t.objectStore(STORE_SALONS);
-      if (mode === "replace") { cStore.clear(); sStore.clear(); }
-      data.salons.forEach(function (s) { if (s && s.id) sStore.put(s); });
-      data.contacts.forEach(function (c) { if (c && c.id) cStore.put(c); });
-      if (data.activeSalonId) {
-        t.objectStore(STORE_META).put({ key: "activeSalonId", value: data.activeSalonId });
-      }
-      return txDone(t);
+      return new Promise(function (resolve, reject) {
+        var t = db.transaction([STORE_CONTACTS, STORE_SALONS, STORE_META], "readwrite");
+        var cStore = t.objectStore(STORE_CONTACTS);
+        var sStore = t.objectStore(STORE_SALONS);
+        var mStore = t.objectStore(STORE_META);
+        var existingC = {}, existingS = {};
+
+        cStore.getAllKeys().onsuccess = function (e1) {
+          (e1.target.result || []).forEach(function (k) { existingC[k] = true; });
+          sStore.getAllKeys().onsuccess = function (e2) {
+            (e2.target.result || []).forEach(function (k) { existingS[k] = true; });
+            applyWrites();
+          };
+        };
+
+        function applyWrites() {
+          if (mode === "replace") { cStore.clear(); sStore.clear(); }
+          data.salons.forEach(function (s) {
+            if (!s || !s.id) return;
+            if (mode === "replace" || !existingS[s.id]) summary.salonsAdded++; else summary.salonsUpdated++;
+            sStore.put(s);
+          });
+          data.contacts.forEach(function (c) {
+            if (!c || !c.id) return;
+            if (mode === "replace" || !existingC[c.id]) summary.contactsAdded++; else summary.contactsUpdated++;
+            cStore.put(c);
+          });
+          if (mode === "replace") {
+            if (data.activeSalonId) mStore.put({ key: "activeSalonId", value: data.activeSalonId });
+            else mStore.delete("activeSalonId");
+          } else if (data.activeSalonId) {
+            mStore.put({ key: "activeSalonId", value: data.activeSalonId });
+          }
+        }
+
+        t.oncomplete = function () { resolve(summary); };
+        t.onerror = function () { reject(t.error || new Error("Import impossible.")); };
+        t.onabort = function () { reject(t.error || new Error("Import annulé.")); };
+      });
     });
   }
 
@@ -217,6 +273,7 @@
     getMeta: getMeta,
     setMeta: setMeta,
     exportAll: exportAll,
+    validateBackup: validateBackup,
     importAll: importAll
   };
 })(window);

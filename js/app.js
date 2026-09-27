@@ -733,9 +733,12 @@
         "</div>" +
         '<div class="panel">' +
           "<h3>Restaurer une sauvegarde</h3>" +
-          "<p>Importez un fichier JSON. Les données sont fusionnées avec l'existant (même identifiant = mise à jour).</p>" +
-          '<input type="file" id="json-file" accept="application/json,.json" style="display:none" />' +
-          '<button class="btn btn--block" id="import-btn">Choisir un fichier…</button>' +
+          "<p>Importez un fichier JSON. Choisissez le mode de restauration. Une sauvegarde de sécurité de vos données actuelles est téléchargée automatiquement avant tout import.</p>" +
+          '<input type="file" id="file-merge" accept="application/json,.json" style="display:none" />' +
+          '<input type="file" id="file-replace" accept="application/json,.json" style="display:none" />' +
+          '<button class="btn btn--block" id="import-merge">Fusionner…</button>' +
+          '<button class="btn btn--block btn--danger" id="import-replace" style="margin-top:8px">Remplacer…</button>' +
+          '<p class="hint"><strong>Fusionner</strong> ajoute et met à jour sans rien supprimer. <strong>Remplacer</strong> écrase toutes les données actuelles par celles du fichier.</p>' +
           '<p class="hint">Aucune donnée n\'est envoyée sur Internet : tout reste sur cet appareil.</p>' +
         "</div>";
 
@@ -744,12 +747,20 @@
         exportCSV(contacts, salons, sid);
       });
       document.getElementById("json-btn").addEventListener("click", exportJSON);
-      var fileInput = document.getElementById("json-file");
-      document.getElementById("import-btn").addEventListener("click", function () { fileInput.click(); });
-      fileInput.addEventListener("change", function () {
-        var f = fileInput.files[0];
-        if (!f) return;
-        importJSON(f);
+
+      var fileMerge = document.getElementById("file-merge");
+      var fileReplace = document.getElementById("file-replace");
+      document.getElementById("import-merge").addEventListener("click", function () { fileMerge.click(); });
+      document.getElementById("import-replace").addEventListener("click", function () { fileReplace.click(); });
+      fileMerge.addEventListener("change", function () {
+        var f = fileMerge.files[0]; if (!f) return;
+        importJSON(f, "merge");
+        fileMerge.value = "";
+      });
+      fileReplace.addEventListener("change", function () {
+        var f = fileReplace.files[0]; if (!f) return;
+        importJSON(f, "replace");
+        fileReplace.value = "";
       });
     });
   });
@@ -795,20 +806,56 @@
     });
   }
 
-  function importJSON(file) {
+  // Sauvegarde de sécurité automatique (même format que l'export JSON).
+  // Rejette si la génération échoue → l'import doit alors être bloqué.
+  function autoBackup() {
+    return DB.exportAll().then(function (data) {
+      download("casselin-crm-backup-auto-" + todayISO() + ".json", JSON.stringify(data, null, 2), "application/json");
+    });
+  }
+
+  function importRecap(s) {
+    if (s.mode === "replace") {
+      return "Remplacement effectué · " + s.contactsAdded + " contact(s), " + s.salonsAdded + " salon(s)";
+    }
+    return "Fusion effectuée · Contacts : " + s.contactsAdded + " ajouté(s), " + s.contactsUpdated +
+      " mis à jour · Salons : " + s.salonsAdded + " ajouté(s), " + s.salonsUpdated + " mis à jour";
+  }
+
+  function importJSON(file, mode) {
+    mode = mode === "replace" ? "replace" : "merge";
     var reader = new FileReader();
     reader.onload = function () {
       var data;
       try { data = JSON.parse(reader.result); }
       catch (e) { toast("Fichier JSON illisible.", "err"); return; }
-      var n = (data.contacts || []).length, s = (data.salons || []).length;
-      if (!confirm("Importer " + n + " contact(s) et " + s + " salon(s) ? Les données seront fusionnées avec l'existant.")) return;
-      DB.importAll(data, "merge").then(function () {
-        return refreshHeaderSalon();
-      }).then(function () {
-        toast("Sauvegarde restaurée", "ok");
+
+      // 1) Validation AVANT toute écriture (aucune écriture partielle si invalide).
+      var v = DB.validateBackup(data);
+      if (!v.valid) { toast(v.error, "err"); return; }
+
+      // 2) Confirmation explicite selon le mode.
+      var counts = "\n\n(" + data.contacts.length + " contact(s), " + data.salons.length + " salon(s))";
+      var msg = mode === "replace"
+        ? "⚠️ Toutes les données actuelles seront remplacées par celles du fichier. Cette action ne peut pas être annulée." + counts
+        : "Les données du fichier seront ajoutées ou mises à jour. Les données existantes absentes du fichier seront conservées." + counts;
+      if (!confirm(msg)) return;
+
+      // 3) Backup de sécurité AVANT toute modification ; si échec → import bloqué.
+      autoBackup().then(function () {
+        return DB.importAll(data, mode);
+      }, function () {
+        toast("Import annulé : la sauvegarde de sécurité a échoué.", "err");
+        return Promise.reject("__backup_failed__");
+      }).then(function (summary) {
+        return refreshHeaderSalon().then(function () { return summary; });
+      }).then(function (summary) {
+        toast(importRecap(summary), "ok");
         go("/");
-      }).catch(function (err) { toast("Erreur : " + (err.message || err), "err"); });
+      }).catch(function (err) {
+        if (err === "__backup_failed__") return; // déjà signalé
+        toast("Erreur : " + (err.message || err), "err");
+      });
     };
     reader.onerror = function () { toast("Lecture du fichier impossible.", "err"); };
     reader.readAsText(file);

@@ -193,28 +193,109 @@ try {
   const parsed = JSON.parse(backupJson);
   ok(parsed.contacts.length === 3 && parsed.salons.length === 1, "Sauvegarde JSON complète (3 contacts, 1 salon)");
 
-  // ---------- 10. Restauration JSON ----------
-  console.log("\n[10] Restauration JSON après suppression");
-  // Supprimer Sophie
+  // ---------- 10. Import sécurisé (Fusionner / Remplacer, backup auto, validation) ----------
+  console.log("\n[10] Import sécurisé");
+  const backupPath = join(userDataDir, "backup-snapshot.json");
+  writeFileSync(backupPath, backupJson); // instantané des 3 contacts + salon Sirha
+
+  const listText = () => page.locator("#list").textContent();
+
+  // 10a. Créer un état local qui DIFFÈRE du backup :
+  //      - un contact ajouté (Lucie, absent du backup)
+  //      - un contact existant modifié (Marie : ville → Nice)
+  await page.click('.tabbar__item[data-route="new"]');
+  await page.waitForSelector('input[name="prenom"]');
+  await page.fill('input[name="prenom"]', "Lucie");
+  await page.fill('input[name="nom"]', "Bernard");
+  await page.fill('input[name="entreprise"]', "Traiteur Local");
+  await page.click("#save");
+  await page.waitForSelector(".detail__name");
   await openContacts();
-  await page.fill("#q", "sophie");
+  await page.fill("#q", "durand");
   await page.waitForFunction(() => document.querySelectorAll("#list .card").length === 1);
   await page.click("#list .card");
-  await page.waitForSelector("#del");
-  await page.click("#del"); // confirm auto-accepté → retour liste
+  await page.waitForSelector('a.btn[href$="/edit"]');
+  await page.click('a.btn[href$="/edit"]');
+  await page.waitForSelector('input[name="ville"]');
+  await page.fill('input[name="ville"]', "Nice");
+  await page.click("#save");
+  await page.waitForSelector(".info");
   await openContacts();
-  await page.waitForFunction(() => document.querySelectorAll("#list .card").length === 2);
-  ok(await countCards() === 2, "Contact supprimé → 2 restants");
+  await page.waitForFunction(() => document.querySelectorAll("#list .card").length === 4);
+  ok(await countCards() === 4, "État local préparé : 4 contacts (Lucie ajoutée, absente du backup)");
 
-  // Réimporter la sauvegarde
-  const restorePath = join(userDataDir, "restore.json");
-  writeFileSync(restorePath, backupJson);
+  // 10b. FUSIONNER avec le backup → backup auto généré, Lucie conservée, Marie mise à jour
   await openExport();
-  await page.setInputFiles("#json-file", restorePath); // confirm auto-accepté → go dashboard
+  const [mergeDl] = await Promise.all([
+    page.waitForEvent("download"),               // sauvegarde de sécurité automatique
+    page.setInputFiles("#file-merge", backupPath),
+  ]);
+  ok(/backup-auto/.test(mergeDl.suggestedFilename()), "Backup de sécurité auto généré AVANT la fusion");
+  await page.waitForFunction(() => document.querySelector(".view__title")?.textContent.includes("Tableau de bord"));
+  await openContacts();
+  await page.waitForFunction(() => document.querySelectorAll("#list .card").length === 4);
+  ok(await countCards() === 4, "Fusion : donnée locale absente du backup CONSERVÉE (Lucie)");
+  ok((await listText()).includes("Lucie"), "Fusion : Lucie toujours présente");
+  ok((await listText()).includes("Marseille") && !(await listText()).includes("Nice"),
+    "Fusion : contact de même id mis à jour depuis le backup (Nice → Marseille)");
+
+  // 10c. REMPLACER par le backup → état strictement identique au backup (Lucie supprimée)
+  await openExport();
+  const [replaceDl] = await Promise.all([
+    page.waitForEvent("download"),
+    page.setInputFiles("#file-replace", backupPath),
+  ]);
+  ok(/backup-auto/.test(replaceDl.suggestedFilename()), "Backup de sécurité auto généré AVANT le remplacement");
   await page.waitForFunction(() => document.querySelector(".view__title")?.textContent.includes("Tableau de bord"));
   await openContacts();
   await page.waitForFunction(() => document.querySelectorAll("#list .card").length === 3);
-  ok(await countCards() === 3, "Restauration JSON → 3 contacts retrouvés");
+  ok(await countCards() === 3, "Remplacement : état identique au backup (3 contacts)");
+  ok(!(await listText()).includes("Lucie"), "Remplacement : donnée locale hors backup supprimée");
+  ok((await listText()).includes("Sirha Lyon 2026"), "Contacts toujours liés au salon après import");
+
+  // 10d. Fichier JSON illisible (corrompu) → aucune écriture, aucun backup auto
+  await openExport();
+  const brokenPath = join(userDataDir, "broken.json");
+  writeFileSync(brokenPath, "{ ceci n'est pas du JSON ");
+  let sawDl = false;
+  const onDl = () => { sawDl = true; };
+  page.on("download", onDl);
+  await page.setInputFiles("#file-merge", brokenPath);
+  await page.waitForFunction(() => (document.getElementById("toast")?.textContent || "").includes("illisible"));
+  await page.waitForTimeout(200);
+  ok(sawDl === false, "JSON corrompu : aucun backup auto, aucune écriture");
+
+  // 10e. JSON valide mais non-Casselin → refusé proprement, aucune écriture
+  const wrongPath = join(userDataDir, "wrong.json");
+  writeFileSync(wrongPath, JSON.stringify({ app: "autre-app", version: 1, contacts: [], salons: [] }));
+  sawDl = false;
+  await page.setInputFiles("#file-merge", wrongPath);
+  await page.waitForFunction(() => (document.getElementById("toast")?.textContent || "").includes("Casselin"));
+  await page.waitForTimeout(200);
+  page.off("download", onDl);
+  ok(sawDl === false, "Fichier invalide : validation avant écriture, aucun backup auto");
+  await openContacts();
+  await page.waitForFunction(() => document.querySelectorAll("#list .card").length === 3);
+  ok(await countCards() === 3, "Fichier invalide : aucune donnée modifiée (3 contacts)");
+
+  // 10f. Échec du backup automatique → import BLOQUÉ (aucune perte de données)
+  await openExport();
+  await page.evaluate(() => {
+    window.__origExport = window.CasselinDB.exportAll;
+    window.CasselinDB.exportAll = () => Promise.reject(new Error("échec simulé"));
+  });
+  let sawDl2 = false;
+  const onDl2 = () => { sawDl2 = true; };
+  page.on("download", onDl2);
+  await page.setInputFiles("#file-replace", backupPath); // confirm auto-accepté, puis backup échoue
+  await page.waitForFunction(() => (document.getElementById("toast")?.textContent || "").includes("sauvegarde de sécurité"));
+  await page.waitForTimeout(200);
+  page.off("download", onDl2);
+  ok(sawDl2 === false, "Échec backup auto : import bloqué (aucun remplacement effectué)");
+  await page.evaluate(() => { window.CasselinDB.exportAll = window.__origExport; });
+  await openContacts();
+  await page.waitForFunction(() => document.querySelectorAll("#list .card").length === 3);
+  ok(await countCards() === 3, "Échec backup auto : données inchangées (3 contacts conservés)");
 
   // ---------- 11. Hors ligne ----------
   console.log("\n[11] Fonctionnement hors ligne");
