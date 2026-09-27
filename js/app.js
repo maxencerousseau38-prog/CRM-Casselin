@@ -142,7 +142,7 @@
       return DB.getSalon(id);
     }).then(function (s) {
       if (s) {
-        headerSalon.textContent = "● " + s.nom;
+        headerSalon.innerHTML = '<span class="salon-dot" aria-hidden="true"></span>' + esc(s.nom);
         headerSalon.classList.remove("is-empty");
       } else {
         headerSalon.textContent = "";
@@ -305,7 +305,7 @@
 
   function emptyState(title, sub) {
     return '<div class="empty">' +
-      '<svg viewBox="0 0 24 24"><path d="M16 11a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm-8 0a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm0 2c-3 0-6 1.5-6 4.5V20h9v-2.5A5.7 5.7 0 0 1 5.5 13zm8 0c-.7 0-1.4.1-2 .2A5.6 5.6 0 0 1 17 17.5V20h7v-2.5c0-3-3-4.5-6-4.5z"/></svg>' +
+      '<svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>' +
       "<p>" + esc(title) + "</p>" + (sub ? "<p>" + esc(sub) + "</p>" : "") + "</div>";
   }
 
@@ -463,7 +463,7 @@
         return '<div class="info__row"><span class="info__key">' + esc(k) + '</span><span class="info__val">' + (isHtml ? v : esc(v)) + "</span></div>";
       }
 
-      var interetLabel = c.interet ? c.interet + (c.interet === "Fort" ? " 🔥" : "") : "";
+      var interetLabel = c.interet || "";
       var relanceBadge = needsRelance(c)
         ? '<span class="badge badge--action">' + esc(c.prochaineAction) + "</span>"
         : (c.prochaineAction && c.prochaineAction !== "Rien" ? '<span class="badge badge--done">Fait</span>' : "");
@@ -643,7 +643,7 @@
         '<h1 class="view__title">Relances</h1>' +
         '<div class="section-title">À faire (' + todo.length + ")</div>" +
         (todo.length ? '<div class="list">' + todo.map(function (c) { return relanceRow(c, false); }).join("") + "</div>"
-                     : '<p class="count-note">Aucune relance en attente. 👍</p>') +
+                     : '<p class="count-note">Aucune relance en attente.</p>') +
         (done.length ? '<div class="section-title">Fait (' + done.length + ")</div><div class=\"list\">" +
             done.map(function (c) { return relanceRow(c, true); }).join("") + "</div>" : "");
 
