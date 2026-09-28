@@ -87,6 +87,131 @@
     });
   }
 
+  /* ---------- Analyse locale d'une carte de visite (parsing OCR → champs) ----------
+     100% local, heuristique déterministe : si un champ est incertain, il reste vide
+     (jamais inventé). Ne fait AUCUNE sauvegarde. */
+  var CARD_FIELDS = ["prenom", "nom", "entreprise", "fonction", "email", "telephone", "website", "ville", "pays"];
+  var TITLE_KW = /(directeur|directrice|g[ée]rant|pr[ée]sident|pr[ée]sidente|responsable|manager|chef\b|commercial|commerciale|sales|ing[ée]nieur|consultant|founder|fondateur|co-?founder|ceo|cto|cfo|coo|head of|account|repr[ée]sentant|attach[ée]|charg[ée]|assistant|technicien|d[ée]veloppeur|marketing|achats|ventes|export|business development)/i;
+  var COMPANY_KW = /(sarl|sasu|sas|eurl|gmbh|ltd|llc|\binc\b|company|groupe|group|& cie|snc|holding|industries?|solutions?|services?|technologies?)/i;
+  var COUNTRIES = {
+    "france": "France", "belgique": "Belgique", "belgium": "Belgique", "suisse": "Suisse", "switzerland": "Suisse",
+    "luxembourg": "Luxembourg", "allemagne": "Allemagne", "germany": "Allemagne", "deutschland": "Allemagne",
+    "espagne": "Espagne", "spain": "Espagne", "italie": "Italie", "italy": "Italie",
+    "royaume-uni": "Royaume-Uni", "united kingdom": "Royaume-Uni", "pays-bas": "Pays-Bas", "netherlands": "Pays-Bas",
+    "portugal": "Portugal", "canada": "Canada", "états-unis": "États-Unis", "etats-unis": "États-Unis", "united states": "États-Unis"
+  };
+  function reEscape(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+  function parseCard(rawText) {
+    var out = { prenom: "", nom: "", entreprise: "", fonction: "", email: "", telephone: "", website: "", ville: "", pays: "" };
+    var text = String(rawText || "");
+    if (!text.trim()) return out;
+    var lines = text.split(/\r?\n/).map(function (l) { return l.trim(); }).filter(Boolean);
+
+    // Email
+    var em = text.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/);
+    if (em) out.email = em[0].toLowerCase();
+    var emailDomain = out.email ? out.email.split("@")[1] : "";
+
+    // Site web (explicite : http(s):// ou www.) ; sinon domaine nu hors email
+    var textNoEmail = text.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, " ");
+    var urlM = textNoEmail.match(/(?:https?:\/\/)?www\.[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+(?:\/[^\s]*)?/i)
+            || textNoEmail.match(/https?:\/\/[^\s]+/i);
+    if (urlM) {
+      out.website = urlM[0].replace(/[.,;)]+$/, "");
+    } else {
+      var toks = textNoEmail.split(/\s+/);
+      for (var i = 0; i < toks.length; i++) {
+        var tk = toks[i].replace(/[.,;)]+$/, "");
+        if (tk.indexOf("@") === -1 && /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(tk) && /\.[A-Za-z]{2,6}$/.test(tk)) { out.website = tk; break; }
+      }
+    }
+
+    // Téléphone : préférer mobile, exclure fax ; sinon premier numéro valable
+    var cands = [];
+    lines.forEach(function (line) {
+      var low = line.toLowerCase();
+      var isFax = /fax/.test(low);
+      var m = line.match(/\+?\d[\d\s().\-]{7,}\d/g);
+      if (!m) return;
+      m.forEach(function (p) {
+        var digits = p.replace(/\D/g, "");
+        if (digits.length < 9 || digits.length > 15) return;
+        var isMobile = /mobile|mob\.?|portable|port\.?|gsm|cell|\bm\s*[:.]/.test(low) || /^0[67]/.test(digits) || /^33[67]/.test(digits);
+        cands.push({ value: p.trim().replace(/\s{2,}/g, " "), isMobile: isMobile, isFax: isFax });
+      });
+    });
+    var nonFax = cands.filter(function (p) { return !p.isFax; });
+    var pick = nonFax.filter(function (p) { return p.isMobile; })[0] || nonFax[0] || cands[0];
+    if (pick) out.telephone = pick.value;
+
+    // Entreprise : ligne avec forme juridique/mot-clé ; sinon ligne contenant la racine du domaine
+    var companyLine = lines.filter(function (l) { return COMPANY_KW.test(l) && l.indexOf("@") === -1; })[0];
+    if (companyLine) {
+      out.entreprise = companyLine;
+    } else {
+      var dom = (out.website || emailDomain).replace(/^https?:\/\//i, "").replace(/^www\./i, "");
+      var root = dom ? dom.split(".")[0] : "";
+      if (root && root.length >= 2) {
+        var rootRe = new RegExp("\\b" + reEscape(root) + "\\b", "i");
+        var hit = lines.filter(function (l) { return rootRe.test(l) && l.indexOf("@") === -1 && !/https?:|www\./i.test(l); })[0];
+        if (hit) out.entreprise = hit;
+      }
+    }
+
+    // Fonction : première ligne contenant un mot-clé de poste
+    var titleLine = lines.filter(function (l) { return TITLE_KW.test(l) && l.indexOf("@") === -1 && !/https?:|www\./i.test(l); })[0];
+    if (titleLine) out.fonction = titleLine;
+
+    // Nom : ligne de 2 à 4 mots capitalisés, sans chiffre/email/site, ni entreprise/fonction
+    var nameLine = lines.filter(function (l) {
+      if (/[@\d]/.test(l) || /https?:|www\./i.test(l)) return false;
+      if (COMPANY_KW.test(l) || TITLE_KW.test(l)) return false;
+      if (out.entreprise && l === out.entreprise) return false;
+      var w = l.split(/\s+/);
+      if (w.length < 2 || w.length > 4) return false;
+      return w.every(function (x) { return /^[A-ZÀ-Ý][A-Za-zÀ-ÿ'’-]+$/.test(x) || /^[A-ZÀ-Ý]{2,}$/.test(x); });
+    })[0];
+    if (nameLine) {
+      var parts = nameLine.split(/\s+/);
+      out.prenom = parts[0];
+      out.nom = parts.slice(1).join(" ");
+    }
+
+    // Pays (dictionnaire) et Ville (code postal FR à 5 chiffres suivi d'un nom)
+    var lower = text.toLowerCase();
+    Object.keys(COUNTRIES).forEach(function (k) {
+      if (out.pays) return;
+      if (new RegExp("(^|[^a-zà-ÿ])" + reEscape(k) + "([^a-zà-ÿ]|$)", "i").test(lower)) out.pays = COUNTRIES[k];
+    });
+    var zipM = text.match(/\b\d{5}\b[ \t]+([A-Za-zÀ-ÿ'’][A-Za-zÀ-ÿ'’ -]{1,29})/);
+    if (zipM) {
+      var city = zipM[1].split(/\n/)[0].trim().replace(/\s{2,}.*/, "").trim();
+      city = city.replace(/\s+(france|belgique|suisse|cedex)\b.*/i, "").trim();
+      if (city && !/\d/.test(city)) out.ville = city;
+    }
+    return out;
+  }
+
+  // Fusionne les champs détectés dans les valeurs actuelles du formulaire.
+  // overwrite=false : ne remplit que les champs vides (préserve la saisie manuelle).
+  // Retourne { result, conflicts, filled }.
+  function mergeCardFields(current, parsed, overwrite) {
+    var result = {}, conflicts = [], filled = 0;
+    CARD_FIELDS.forEach(function (n) {
+      var cur = ((current && current[n]) || "").trim();
+      var val = (parsed && parsed[n]) || "";
+      result[n] = current ? (current[n] || "") : "";
+      if (!val) return;
+      if (cur && cur !== val) { conflicts.push(n); if (overwrite) { result[n] = val; filled++; } }
+      else if (!cur) { result[n] = val; filled++; }
+    });
+    return { result: result, conflicts: conflicts, filled: filled };
+  }
+
+  // Exposé pour les tests (parsing local déterministe, sans OCR).
+  window.CasselinCardParser = { parse: parseCard, merge: mergeCardFields, fields: CARD_FIELDS };
+
   // Normalise une URL saisie pour un href cliquable (ajoute https:// si absent).
   function normalizeUrl(u) {
     u = String(u == null ? "" : u).trim();
@@ -402,11 +527,12 @@
               '<div class="scan__result" id="scan-result" hidden>' +
                 '<label class="scan__result-label" for="scan-text">Texte détecté (brut)</label>' +
                 '<textarea id="scan-text" rows="6" readonly></textarea>' +
+                '<button type="button" class="btn btn--sm btn--primary scan__apply" id="scan-apply">Vérifier les informations</button>' +
                 '<div class="scan__actions">' +
                   '<button type="button" class="btn btn--sm" id="scan-reocr">Refaire</button>' +
                   '<button type="button" class="btn btn--sm btn--danger" id="scan-clear">Effacer</button>' +
                 "</div>" +
-                '<p class="hint">Texte reconnu localement, en mémoire uniquement — non enregistré.</p>' +
+                '<p class="hint">Texte reconnu localement, en mémoire uniquement — non enregistré. Vérifiez et corrigez les champs avant d\'enregistrer.</p>' +
               "</div>" +
               '<p class="hint">La photo reste sur cet appareil, en mémoire uniquement — elle n\'est ni envoyée ni enregistrée.</p>' +
             "</div>" +
@@ -524,6 +650,26 @@
       scanClear.addEventListener("click", function () {
         scanText.value = "";
         scanResult.hidden = true;
+      });
+
+      // « Vérifier les informations » → préremplit le formulaire (jamais de sauvegarde,
+      // jamais d'écrasement d'une valeur manuelle sans confirmation).
+      var scanApply = document.getElementById("scan-apply");
+      scanApply.addEventListener("click", function () {
+        var parsed = parseCard(scanText.value);
+        var current = {};
+        CARD_FIELDS.forEach(function (n) { var el = form.elements[n]; current[n] = el ? el.value : ""; });
+        var conflicts = mergeCardFields(current, parsed, false).conflicts;
+        var overwrite = false;
+        if (conflicts.length) {
+          overwrite = confirm("Des champs sont déjà remplis (" + conflicts.length + "). Remplacer par les valeurs détectées ?\n\nAnnuler = conserver vos saisies et ne compléter que les champs vides.");
+        }
+        var res = mergeCardFields(current, parsed, overwrite);
+        CARD_FIELDS.forEach(function (n) {
+          var el = form.elements[n];
+          if (el && res.result[n] !== undefined) el.value = res.result[n];
+        });
+        toast(res.filled ? "Champs préremplis — vérifiez avant d'enregistrer." : "Aucune information exploitable détectée.", res.filled ? "ok" : "err");
       });
     });
   }

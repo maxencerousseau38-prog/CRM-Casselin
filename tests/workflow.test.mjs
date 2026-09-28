@@ -611,6 +611,95 @@ try {
   ok(true, "OCR fonctionne HORS LIGNE via le cache PWA");
   await context.setOffline(false);
 
+  // ---------- 16. Parsing local du texte OCR → préremplissage ----------
+  console.log("\n[16] Parsing OCR → préremplissage");
+  const parse = (t) => page.evaluate((x) => window.CasselinCardParser.parse(x), t);
+  const merge = (cur, p, ow) => page.evaluate((a) => window.CasselinCardParser.merge(a[0], a[1], a[2]), [cur, p, ow]);
+  const digits = (s) => (s || "").replace(/\D/g, "");
+
+  // Carte française
+  const fr = await parse("CASSELIN\nJean Dupont\nDirecteur Commercial\ncontact@casselin.fr\nTél. +33 4 76 00 11 22\nMobile 06 12 34 56 78\n38000 Grenoble\nFrance\nwww.casselin.fr");
+  ok(fr.email === "contact@casselin.fr", "FR: email détecté");
+  ok(/casselin\.fr/.test(fr.website) && /www/.test(fr.website), "FR: site web détecté");
+  ok(digits(fr.telephone) === "0612345678", "FR: mobile prioritaire sur le fixe");
+  ok(fr.prenom === "Jean" && fr.nom === "Dupont", "FR: prénom/nom détectés");
+  ok(/Directeur/i.test(fr.fonction), "FR: fonction détectée");
+  ok(/CASSELIN/i.test(fr.entreprise), "FR: entreprise détectée");
+  ok(fr.ville === "Grenoble", "FR: ville via code postal");
+  ok(fr.pays === "France", "FR: pays détecté");
+
+  // Carte anglaise
+  const en = await parse("ACME Solutions Ltd\nJohn Smith\nHead of Sales\njohn.smith@acme.com\nPhone: +44 20 7946 0000\nLondon\nUnited Kingdom\nwww.acme.com");
+  ok(en.email === "john.smith@acme.com", "EN: email détecté");
+  ok(/acme\.com/.test(en.website), "EN: site web détecté");
+  ok(en.prenom === "John" && en.nom === "Smith", "EN: prénom/nom détectés");
+  ok(/Sales/i.test(en.fonction), "EN: fonction détectée");
+  ok(/ACME/i.test(en.entreprise) && /Ltd/i.test(en.entreprise), "EN: entreprise détectée");
+  ok(en.pays === "Royaume-Uni", "EN: pays détecté");
+  ok(en.ville === "", "EN: ville laissée vide (pas de code postal → non inventée)");
+
+  // Carte avec site web explicite (https)
+  const w = await parse("Sophie Martin\nGraphiste\nsophie@studio-lumiere.fr\nhttps://www.studio-lumiere.fr\n01 23 45 67 89");
+  ok(w.website === "https://www.studio-lumiere.fr", "SITE: URL https conservée telle quelle");
+  ok(w.email === "sophie@studio-lumiere.fr", "SITE: email détecté");
+  ok(w.prenom === "Sophie" && w.nom === "Martin", "SITE: prénom/nom détectés");
+  ok(digits(w.telephone) === "0123456789", "SITE: téléphone détecté");
+
+  // Carte sans email
+  const ne = await parse("Pierre Bernard\nConsultant\n+33 6 98 76 54 32\nwww.pierre-bernard.com\nLyon\nFrance");
+  ok(ne.email === "", "SANS-EMAIL: email vide (rien inventé)");
+  ok(digits(ne.telephone) === "33698765432", "SANS-EMAIL: téléphone détecté");
+  ok(/pierre-bernard\.com/.test(ne.website), "SANS-EMAIL: site web détecté");
+  ok(ne.prenom === "Pierre" && ne.nom === "Bernard", "SANS-EMAIL: prénom/nom détectés");
+  ok(ne.pays === "France", "SANS-EMAIL: pays détecté");
+  ok(ne.entreprise === "", "SANS-EMAIL: entreprise vide (non inventée)");
+
+  // Carte avec plusieurs numéros (mobile prioritaire, fax ignoré)
+  const mn = await parse("Marie Leroy\nResponsable Achats\nStandard: +33 1 40 00 00 00\nMobile: +33 6 11 22 33 44\nFax: +33 1 40 00 00 01\nmarie.leroy@bigcorp.fr");
+  ok(digits(mn.telephone) === "33611223344", "MULTI: mobile choisi (ni standard ni fax)");
+  ok(mn.email === "marie.leroy@bigcorp.fr", "MULTI: email détecté");
+  ok(/Achats/i.test(mn.fonction), "MULTI: fonction détectée");
+  ok(mn.prenom === "Marie" && mn.nom === "Leroy", "MULTI: prénom/nom détectés");
+
+  // Fusion : ne remplit que les champs vides, ne remplace jamais une valeur manuelle sans confirmation
+  const cur = { prenom: "", nom: "Manuel", email: "manuel@moi.fr", website: "", entreprise: "", fonction: "", telephone: "", ville: "", pays: "" };
+  const p16 = { prenom: "Jean", nom: "Dupont", email: "contact@casselin.fr", website: "www.casselin.fr", entreprise: "", fonction: "", telephone: "", ville: "", pays: "" };
+  const m1 = await merge(cur, p16, false);
+  ok(m1.result.prenom === "Jean" && m1.result.website === "www.casselin.fr", "FUSION: champs vides remplis");
+  ok(m1.result.nom === "Manuel" && m1.result.email === "manuel@moi.fr", "FUSION: valeurs manuelles conservées (sans confirmation)");
+  ok(m1.conflicts.indexOf("nom") !== -1 && m1.conflicts.indexOf("email") !== -1, "FUSION: conflits détectés");
+  const m2 = await merge(cur, p16, true);
+  ok(m2.result.nom === "Dupont" && m2.result.email === "contact@casselin.fr", "FUSION: écrasement uniquement si confirmé");
+
+  // Intégration : OCR réel → « Vérifier les informations » → formulaire prérempli, saisie manuelle préservée, aucune sauvegarde auto
+  const cardUrl = await page.evaluate(() => {
+    const c = document.createElement("canvas"); c.width = 900; c.height = 300;
+    const g = c.getContext("2d");
+    g.fillStyle = "#fff"; g.fillRect(0, 0, 900, 300);
+    g.fillStyle = "#000"; g.font = "bold 84px Arial"; g.fillText("CASSELIN", 40, 110);
+    g.font = "40px Arial"; g.fillText("contact@casselin.com", 40, 175);
+    g.fillText("www.casselin.com", 40, 235); g.fillText("+33 4 76 00 00 00", 40, 290);
+    return c.toDataURL("image/png");
+  });
+  const card16 = join(userDataDir, "card16.png");
+  fs4.writeFileSync(card16, Buffer.from(cardUrl.split(",")[1], "base64"));
+  await page.click('.tabbar__item[data-route="new"]');
+  await page.waitForSelector("#scan-input", { state: "attached" });
+  await page.fill('input[name="fonction"]', "Chef de projet"); // saisie manuelle préalable
+  await page.setInputFiles("#scan-input", card16);
+  await page.waitForSelector("#scan-preview:not([hidden])");
+  await page.click("#scan-analyze");
+  await page.waitForFunction(() => {
+    const t = document.getElementById("scan-text"); const r = document.getElementById("scan-result");
+    return r && !r.hidden && t && /casselin\.com/i.test(t.value);
+  }, null, { timeout: 60000 });
+  await page.click("#scan-apply");
+  ok((await page.locator('input[name="email"]').inputValue()) === "contact@casselin.com", "INTÉGRATION: email prérempli depuis l'OCR");
+  ok(/casselin\.com/.test(await page.locator('input[name="website"]').inputValue()), "INTÉGRATION: site web prérempli");
+  ok(digits(await page.locator('input[name="telephone"]').inputValue()).length >= 8, "INTÉGRATION: téléphone prérempli");
+  ok((await page.locator('input[name="fonction"]').inputValue()) === "Chef de projet", "INTÉGRATION: saisie manuelle préservée (fonction)");
+  ok((await page.locator(".detail__name").count()) === 0, "INTÉGRATION: aucune sauvegarde automatique (toujours sur le formulaire)");
+
 } catch (err) {
   failed++;
   console.error("\nERREUR DE TEST:", err);
